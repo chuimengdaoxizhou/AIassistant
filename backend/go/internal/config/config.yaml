@@ -1,0 +1,186 @@
+app:
+  name: "Jarvis"
+  version: "1.0"
+  environment: "development"
+
+# 日志记录器配置
+logger:
+  level: "info"
+
+# 认证配置
+auth:
+  method: "jwt" # or "session"
+  jwt:
+  secret: "your-super-strong-and-long-jwt-secret-key"
+
+# 中间件配置
+middleware:
+  # 限流器配置
+  rateLimiter:
+    enabled: true
+    # 可选算法: "fixedWindow", "slidingLog", "slidingCounter", "leakyBucket", "tokenBucket"
+    algorithm: "tokenBucket"
+
+    # 固定窗口计数器配置
+    fixedWindow:
+      limit: 100
+      window: "1m" # 1分钟
+
+    # 滑动窗口日志配置
+    slidingLog:
+      limit: 100
+      window: "1m" # 1分钟
+
+    # 滑动窗口计数器配置
+    slidingCounter:
+      limit: 100
+      window: "1m" # 1分钟
+      numBuckets: 10 # 将1分钟的窗口分为10个桶
+
+    # 漏桶配置
+    leakyBucket:
+      rate: 10 # 每秒处理10个请求
+      capacity: 100
+
+    # 令牌桶配置
+    tokenBucket:
+      rate: 10 # 每秒生成10个令牌
+      capacity: 100
+
+  # 熔断器配置
+  circuitBreaker:
+    enabled: true
+    failureThreshold: 5     # 连续5次失败后打开断路器
+    successThreshold: 3     # 在半开状态下，3次连续成功后关闭断路器
+    timeout: "30s"          # 断路器打开后，30秒后进入半开状态
+  sessionKey: "your-super-secret-session-key" # a
+  tokenTTL: 3600 # a
+  sessionTTL: 3600 # a
+  google:
+    clientID: "YOUR_GOOGLE_CLIENT_ID"
+    clientSecret: "YOUR_GOOGLE_CLIENT_SECRET"
+    redirectURL: "http://localhost:8080/auth/google/callback"
+
+# LLM Configuration
+llm:
+  provider: "gemini"
+  gemini:
+    apiKey: "AIzaSyAcgIJQKf5dmQGhlysEr9HlNF_LREO1dGo" # <-- IMPORTANT: Replace with your actual key
+    model: "gemini-pro"
+
+# Embedding Configuration
+embedding:
+  provider: "gemini"
+  gemini:
+    apiKey: "AIzaSyAcgIJQKf5dmQGhlysEr9HlNF_LREO1dGo" # <-- IMPORTANT: Replace with your actual key
+    model: "embedding-001"
+
+# 所有数据库配置
+databases:
+  # Milvus 配置
+  milvus:
+    address: "localhost:19530"
+    schema:
+      collectionName: "jarvis_embeddings"
+      description: "一个通过可扩展 YAML 配置的集合"
+      vectorField: "vector"
+      fields:
+        - name: "id"
+          dataType: "Int64"
+          isPrimaryKey: true
+          isAutoID: false
+        - name: "source"
+          dataType: "VarChar"
+          maxLength: 255
+        - name: "text_md5"
+          dataType: "VarChar"
+          maxLength: 32
+        - name: "vector"
+          dataType: "FloatVector"
+          dim: 768
+      index:
+        fieldName: "vector"
+        indexType: "HNSW" # 尝试使用 HNSW 索引
+        metricType: "L2"
+        params:
+          # HNSW 索引的参数
+          M: 16
+          efConstruction: 256
+
+  images:
+    address: "localhost:19530"
+    schema:
+      collectionName: "jarvis_images"
+      description: "Collection to store image embeddings and their corresponding Minio object names."
+      vectorField: "prompt_vector"
+      fields:
+        - name: "image_id"
+          dataType: "VarChar"
+          isPrimaryKey: true
+          maxLength: 255
+        - name: "prompt_vector"
+          dataType: "FloatVector"
+          dim: 768
+      index:
+        fieldName: "prompt_vector"
+        indexType: "HNSW"
+        metricType: "L2"
+        params:
+          M: 16
+          efConstruction: 256
+
+  # Redis 配置
+  redis:
+    address: "localhost:6379"
+    password: ""
+    db: 0
+
+  # MySQL 配置
+  mysql:
+    address: "localhost:3306"
+    username: "root"
+    password: ""
+    database: "jarvis"
+
+  # MinIO 配置
+  minio:
+    endpoint: "localhost:9000"
+    accessKey: "minioadmin"
+    secretKey: "minioadmin"
+    bucket: "jarvis"
+    secure: false
+
+  # MongoDB 配置
+  mongodb:
+    address: "localhost:27017"
+    username: ""
+    password: ""
+    database: "jarvis"
+
+  # Neo4j 配置
+  neo4j:
+    uri: "bolt://localhost:7687"
+    username: "neo4j"
+    password: ""
+    database: "neo4j"
+
+  # Memgraph 配置
+  memgraph:
+    uri: "bolt://localhost:7687"
+    username: "memgraph"
+    password: "memgraph_password"
+    database: "memgraph_db"
+
+  # Etcd 配置
+  etcd:
+    endpoints: ["localhost:2379"]
+    username: ""
+    password: ""
+
+  # Kafka Configuration
+  kafka:
+    brokers:
+      - "localhost:9092"
+    topics:
+      - "jarvis-events"
+      - "jarvis-tasks"

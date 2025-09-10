@@ -1,0 +1,7 @@
+grpcio
+grpcio-tools
+python3-etcd3
+pandas
+numpy
+protobuf
+matplotlib
