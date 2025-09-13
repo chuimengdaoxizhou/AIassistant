@@ -21,15 +21,15 @@ func NewFilesystemServer(allowedDirs []string) (*server.MCPServer, error) {
 
 	// 创建一个新的 MCP 服务实例
 	s := server.NewMCPServer(
-		"secure-filesystem-server",                  // 服务名称
-		Version,                                     // 服务版本
+		"secure-filesystem-server", // 服务名称
+		Version,                    // 服务版本
 		server.WithResourceCapabilities(true, true), // 启用资源能力
 	)
 
 	// 注册资源处理器
 	s.AddResource(mcp.NewResource(
-		"file://",                                                                               // 资源 URI 前缀
-		"File System",                                                                           // 资源名称
+		"file://",     // 资源 URI 前缀
+		"File System", // 资源名称
 		mcp.WithResourceDescription("Access to files and directories on the local file system"), // 资源描述
 	), h.HandleReadResource) // 处理器函数
 

@@ -2,9 +2,7 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/gemini-cli" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/mcp-filesystem-server" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/mcp-go" vcs="Git" />
-    <mapping directory="$PROJECT_DIR$/mcphost" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/unioffice" vcs="Git" />
   </component>
 </project>
