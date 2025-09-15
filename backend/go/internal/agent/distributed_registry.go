@@ -9,85 +9,76 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"log"
-	"strconv"
-	"strings"
 	"sync"
+	"time"
 )
 
 // DistributedRegistry 负责发现和管理分布式的子 Agent。
+// 它实现了 Registry 接口。
+var _ Registry = (*DistributedRegistry)(nil) // 编译时检查，确保实现了接口
+
 type DistributedRegistry struct {
-	sd         *etcd.ServiceDiscovery
-	agents     map[string]AgentMetadata         // 缓存 Agent 的元数据
-	clients    map[string]v1.AgentServiceClient // 缓存 gRPC 客户端连接
-	clientLock sync.RWMutex
-	metaLock   sync.RWMutex
+	sd      *etcd.ServiceDiscovery
+	agents  map[string]*v1.AgentMetadata     // 修正：直接缓存从gRPC获取的protobuf元数据
+	clients map[string]v1.AgentServiceClient // 缓存 gRPC 客户端连接
+	mutex   sync.RWMutex
 }
 
 // NewDistributedRegistry 创建一个新的分布式注册表。
 func NewDistributedRegistry(sd *etcd.ServiceDiscovery) *DistributedRegistry {
 	return &DistributedRegistry{
 		sd:      sd,
-		agents:  make(map[string]AgentMetadata),
+		agents:  make(map[string]*v1.AgentMetadata),
 		clients: make(map[string]v1.AgentServiceClient),
 	}
 }
 
-// DiscoverAndCacheAgents 从 etcd 发现所有 agent 服务并缓存它们的元数据。
+// DiscoverAndCacheAgents 从 etcd 发现所有 agent 服务并缓存它们的元数据和客户端连接。
 func (r *DistributedRegistry) DiscoverAndCacheAgents() error {
-	// 这里的服务发现前缀可以做得更灵活
-	services, err := r.sd.Discover("_agent")
+	services, err := r.sd.DiscoverServices("/services/")
 	if err != nil {
 		return fmt.Errorf("failed to discover agents from etcd: %w", err)
 	}
 
-	for serviceName, addresses := range services {
-		if len(addresses) == 0 {
+	for agentName, addr := range services {
+		if _, ok := r.clients[agentName]; ok {
 			continue
 		}
-		// 简单起见，我们只连接第一个地址
-		addr := addresses[0]
 
-		conn, err := grpc.Dial(strconv.Itoa(int(addr)), grpc.WithTransportCredentials(insecure.NewCredentials()))
+		conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err != nil {
-			log.Printf("failed to connect to agent %s at %s: %v", serviceName, addr, err)
+			log.Printf("failed to connect to agent %s at %s: %v", agentName, addr, err)
 			continue
 		}
 
 		client := v1.NewAgentServiceClient(conn)
-		meta, err := client.GetMetadata(context.Background(), &empty.Empty{})
+
+		// 通过 gRPC 动态获取元数据
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		meta, err := client.GetMetadata(ctx, &empty.Empty{})
 		if err != nil {
-			log.Printf("failed to get metadata from agent %s: %v", serviceName, err)
-			conn.Close()
+			log.Printf("failed to get metadata from agent %s: %v", agentName, err)
+			cancel()
+			conn.Close() // 获取元数据失败，关闭连接
 			continue
 		}
+		cancel()
 
-		// 清理服务名称中的前缀，得到 agent 的真实名称
-		agentName := strings.TrimSuffix(strconv.Itoa(serviceName), "_agent")
-
-		// 缓存元数据和客户端
-		r.metaLock.Lock()
-		r.agents[agentName] = AgentMetadata{
-			Name:              meta.GetName(),
-			Capability:        meta.GetCapability(),
-			InputDescription:  meta.GetInputDescription(),
-			OutputDescription: meta.GetOutputDescription(),
-		}
-		r.metaLock.Unlock()
-
-		r.clientLock.Lock()
+		r.mutex.Lock()
+		r.agents[agentName] = meta
 		r.clients[agentName] = client
-		r.clientLock.Unlock()
+		r.mutex.Unlock()
 
-		log.Printf("Successfully discovered and cached agent: %s", agentName)
+		log.Printf("Successfully discovered and cached agent: %s at %s", agentName, addr)
 	}
 	return nil
 }
 
 // GetAgentMetadata 返回所有缓存的 Agent 元数据。
-func (r *DistributedRegistry) GetAgentMetadata() []AgentMetadata {
-	r.metaLock.RLock()
-	defer r.metaLock.RUnlock()
-	var metadataList []AgentMetadata
+func (r *DistributedRegistry) GetAgentMetadata() []*v1.AgentMetadata { // 修正：返回值类型
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+	var metadataList []*v1.AgentMetadata // 修正：切片类型
 	for _, meta := range r.agents {
 		metadataList = append(metadataList, meta)
 	}
@@ -96,8 +87,8 @@ func (r *DistributedRegistry) GetAgentMetadata() []AgentMetadata {
 
 // GetAgentClient 获取一个到指定 Agent 的 gRPC 客户端连接。
 func (r *DistributedRegistry) GetAgentClient(name string) (v1.AgentServiceClient, bool) {
-	r.clientLock.RLock()
-	defer r.clientLock.RUnlock()
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
 	client, found := r.clients[name]
 	return client, found
 }

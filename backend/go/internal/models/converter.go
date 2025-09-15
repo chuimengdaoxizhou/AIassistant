@@ -1,3 +1,4 @@
+
 package models
 
 import (
@@ -10,48 +11,37 @@ import (
 	"time"
 )
 
-// ConvertAgentMetadataToFunctionDeclarations 将内部 AgentMetadata 列表转换为 Gemini FunctionDeclaration 指针列表。
-func ConvertAgentMetadataToFunctionDeclarations(metadataList []AgentMetadata) []*genai.FunctionDeclaration {
+// ConvertAgentMetadataToFunctionDeclarations 根据您的新思路：
+// 将从子Agent获取的简单元数据（proto类型）合成为LLM所需的、结构化的FunctionDeclaration。
+// 每个子Agent都被包装成一个接收单一字符串参数（task_description）的工具。
+func ConvertAgentMetadataToFunctionDeclarations(metadataList []*v1.AgentMetadata) []*genai.FunctionDeclaration {
 	if metadataList == nil {
 		return nil
 	}
 	declarations := make([]*genai.FunctionDeclaration, 0, len(metadataList))
 	for _, meta := range metadataList {
+		// 为每个 agent 创建一个标准化的输入参数 Schema
+		params := &genai.Schema{
+			Type: genai.TypeObject,
+			Properties: map[string]*genai.Schema{
+				"task_description": {
+					Type:        genai.TypeString,
+					Description: meta.InputDescription, // 使用proto中的 input_description 作为参数描述
+				},
+			},
+			Required: []string{"task_description"},
+		}
+
 		declarations = append(declarations, &genai.FunctionDeclaration{
-			Name:        meta.Name,
-			Description: meta.Description,
-			Parameters:  convertSchemaToGenaiSchema(meta.InputSchema),
+			Name:        meta.Name,       // 使用 proto 中的 name
+			Description: meta.Capability, // 使用 proto 中的 capability 作为工具描述
+			Parameters:  params,
 		})
 	}
 	return declarations
 }
 
-// convertSchemaToGenaiSchema 递归地将内部 Schema 转换为 Gemini Schema。
-func convertSchemaToGenaiSchema(schema *Schema) *genai.Schema {
-	if schema == nil {
-		return nil
-	}
-
-	genaiSchema := &genai.Schema{
-		Type:        genai.Type(schema.Type),
-		Description: schema.Description,
-		Enum:        schema.Enum,
-		Required:    schema.Required,
-	}
-
-	if schema.Properties != nil {
-		genaiSchema.Properties = make(map[string]*genai.Schema)
-		for k, v := range schema.Properties {
-			genaiSchema.Properties[k] = convertSchemaToGenaiSchema(v)
-		}
-	}
-
-	if schema.Items != nil {
-		genaiSchema.Items = convertSchemaToGenaiSchema(schema.Items)
-	}
-
-	return genaiSchema
-}
+// --- 其他转换函数保持不变 ---
 
 // ConvertProtoToModelsContent 将 protobuf 的 Content 转换为 models 的 Content。
 func ConvertProtoToModelsContent(protoContent []*v1.Content) []Content {
@@ -151,7 +141,6 @@ func ConvertModelsToProtoParts(modelParts []*Part) ([]*v1.Part, error) {
 		case mp.VideoMetadata != nil:
 			protoPart.VideoMetadata = ConvertModelsToProtoVideoMetadata(mp.VideoMetadata)
 		default:
-			// 如果没有其他数据类型，则默认为文本。
 			protoPart.Text = mp.Text
 		}
 
@@ -181,41 +170,27 @@ func ConvertModelsToProtoFunctionCall(modelFC *FunctionCall) (*v1.FunctionCall, 
 }
 
 // ConvertModelsToProtoTask 根据父任务为子任务创建一个新的 AgentTask。
-// 这个函数是 Agent 间任务派发的核心，它通过 parentTask 传递上下文，
-// 并为子任务生成新的唯一标识，同时保留了任务链的跟踪信息。
 func ConvertModelsToProtoTask(parentTask *v1.AgentTask, newContent Content, targetAgentID, taskName string) (*v1.AgentTask, error) {
 	protoContent, err := ConvertModelsToProtoContent([]Content{newContent})
 	if err != nil {
 		return nil, err
 	}
 
-	// 为子任务生成新的唯一 TaskId
 	newTaskId := uuid.NewString()
-
-	// 确保 CorrelationId 存在，如果父任务没有，则为整个链创建一个新的
 	correlationId := parentTask.GetCorrelationId()
 	if correlationId == "" {
 		correlationId = uuid.NewString()
 	}
 
-	// 构建新的 AgentTask
 	subTask := &v1.AgentTask{
-		// --- 核心元数据 ---
 		TaskId:        newTaskId,
-		CorrelationId: correlationId,      // 传递 CorrelationId 以便进行端到端跟踪
-		ParentTaskId:  parentTask.TaskId, // 设置 ParentTaskId 以建立父子关系
-
-		// --- 路由和命名 ---
-		SourceAgentId: parentTask.TargetAgentId, // 源 Agent 是当前 Agent
-		TargetAgentId: targetAgentID,           // 目标是子 Agent
+		CorrelationId: correlationId,
+		ParentTaskId:  parentTask.TaskId,
+		SourceAgentId: parentTask.TargetAgentId,
+		TargetAgentId: targetAgentID,
 		TaskName:      taskName,
-
-		// --- 载荷 (Payload) ---
-		Content: protoContent,
-
-		// --- 控制参数 ---
-		CreatedAt: timestamppb.New(time.Now()),
-		// Timeout 和 RetryPolicy 可以从父任务继承或根据需要重新定义
+		Content:       protoContent,
+		CreatedAt:     timestamppb.New(time.Now()),
 		TimeoutSeconds: parentTask.TimeoutSeconds,
 		RetryPolicy:    parentTask.RetryPolicy,
 	}
@@ -223,9 +198,8 @@ func ConvertModelsToProtoTask(parentTask *v1.AgentTask, newContent Content, targ
 	return subTask, nil
 }
 
-// --- 新增的辅助转换函数 ---
+// --- 其他辅助转换函数 ---
 
-// ConvertProtoToModelsBlob 将 protobuf 的 Blob 转换为 models 的 Blob。
 func ConvertProtoToModelsBlob(protoBlob *v1.Blob) *Blob {
 	if protoBlob == nil {
 		return nil
@@ -237,7 +211,6 @@ func ConvertProtoToModelsBlob(protoBlob *v1.Blob) *Blob {
 	}
 }
 
-// ConvertModelsToProtoBlob 将 models 的 Blob 转换为 protobuf 的 Blob。
 func ConvertModelsToProtoBlob(modelBlob *Blob) *v1.Blob {
 	if modelBlob == nil {
 		return nil
@@ -245,11 +218,10 @@ func ConvertModelsToProtoBlob(modelBlob *Blob) *v1.Blob {
 	return &v1.Blob{
 		DisplayName: modelBlob.DisplayName,
 		Data:        modelBlob.Data,
-		MimeType:    modelBlob.MimeType,
+		MimeType:    modelBlob.MIMEType,
 	}
 }
 
-// ConvertProtoToModelsFileData 将 protobuf 的 FileData 转换为 models 的 FileData。
 func ConvertProtoToModelsFileData(protoFileData *v1.FileData) *FileData {
 	if protoFileData == nil {
 		return nil
@@ -261,7 +233,6 @@ func ConvertProtoToModelsFileData(protoFileData *v1.FileData) *FileData {
 	}
 }
 
-// ConvertModelsToProtoFileData 将 models 的 FileData 转换为 protobuf 的 FileData。
 func ConvertModelsToProtoFileData(modelFileData *FileData) *v1.FileData {
 	if modelFileData == nil {
 		return nil
@@ -273,7 +244,6 @@ func ConvertModelsToProtoFileData(modelFileData *FileData) *v1.FileData {
 	}
 }
 
-// ConvertProtoToModelsFunctionResponse 将 protobuf 的 FunctionResponse 转换为 models 的 FunctionResponse。
 func ConvertProtoToModelsFunctionResponse(protoFR *v1.FunctionResponse) *FunctionResponse {
 	if protoFR == nil {
 		return nil
@@ -287,7 +257,6 @@ func ConvertProtoToModelsFunctionResponse(protoFR *v1.FunctionResponse) *Functio
 	}
 }
 
-// ConvertModelsToProtoFunctionResponse 将 models 的 FunctionResponse 转换为 protobuf 的 FunctionResponse。
 func ConvertModelsToProtoFunctionResponse(modelFR *FunctionResponse) (*v1.FunctionResponse, error) {
 	if modelFR == nil {
 		return nil, nil
@@ -309,7 +278,6 @@ func ConvertModelsToProtoFunctionResponse(modelFR *FunctionResponse) (*v1.Functi
 	}, nil
 }
 
-// ConvertProtoToModelsCodeExecutionResult 将 protobuf 的 CodeExecutionResult 转换为 models 的 CodeExecutionResult。
 func ConvertProtoToModelsCodeExecutionResult(protoCER *v1.CodeExecutionResult) *CodeExecutionResult {
 	if protoCER == nil {
 		return nil
@@ -320,7 +288,6 @@ func ConvertProtoToModelsCodeExecutionResult(protoCER *v1.CodeExecutionResult) *
 	}
 }
 
-// ConvertModelsToProtoCodeExecutionResult 将 models 的 CodeExecutionResult 转换为 protobuf 的 CodeExecutionResult。
 func ConvertModelsToProtoCodeExecutionResult(modelCER *CodeExecutionResult) *v1.CodeExecutionResult {
 	if modelCER == nil {
 		return nil
@@ -335,7 +302,6 @@ func ConvertModelsToProtoCodeExecutionResult(modelCER *CodeExecutionResult) *v1.
 	}
 }
 
-// ConvertProtoToModelsExecutableCode 将 protobuf 的 ExecutableCode 转换为 models 的 ExecutableCode。
 func ConvertProtoToModelsExecutableCode(protoEC *v1.ExecutableCode) *ExecutableCode {
 	if protoEC == nil {
 		return nil
@@ -346,7 +312,6 @@ func ConvertProtoToModelsExecutableCode(protoEC *v1.ExecutableCode) *ExecutableC
 	}
 }
 
-// ConvertModelsToProtoExecutableCode 将 models 的 ExecutableCode 转换为 protobuf 的 ExecutableCode。
 func ConvertModelsToProtoExecutableCode(modelEC *ExecutableCode) *v1.ExecutableCode {
 	if modelEC == nil {
 		return nil
@@ -361,7 +326,6 @@ func ConvertModelsToProtoExecutableCode(modelEC *ExecutableCode) *v1.ExecutableC
 	}
 }
 
-// ConvertProtoToModelsVideoMetadata 将 protobuf 的 VideoMetadata 转换为 models 的 VideoMetadata。
 func ConvertProtoToModelsVideoMetadata(protoVM *v1.VideoMetadata) *VideoMetadata {
 	if protoVM == nil {
 		return nil
@@ -373,7 +337,6 @@ func ConvertProtoToModelsVideoMetadata(protoVM *v1.VideoMetadata) *VideoMetadata
 	}
 }
 
-// ConvertModelsToProtoVideoMetadata 将 models 的 VideoMetadata 转换为 protobuf 的 VideoMetadata。
 func ConvertModelsToProtoVideoMetadata(modelVM *VideoMetadata) *v1.VideoMetadata {
 	if modelVM == nil {
 		return nil

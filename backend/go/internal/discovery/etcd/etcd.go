@@ -2,17 +2,18 @@ package etcd
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
-// ServiceDiscovery defines the interface for service discovery.
+// ServiceDiscovery 定义了服务发现的接口。
 type ServiceDiscovery struct {
 	cli *clientv3.Client // etcd client
 }
 
-// NewServiceDiscovery creates a new ServiceDiscovery.
+// NewServiceDiscovery 创建一个新的 ServiceDiscovery。
 func NewServiceDiscovery(endpoints []string) (*ServiceDiscovery, error) {
 
 	cli, err := clientv3.New(clientv3.Config{
@@ -25,14 +26,16 @@ func NewServiceDiscovery(endpoints []string) (*ServiceDiscovery, error) {
 	return &ServiceDiscovery{cli: cli}, nil
 }
 
-// Register registers a service with etcd.
+// Register 注册一个服务到 etcd。
 func (s *ServiceDiscovery) Register(serviceName, addr string, ttl int64) (chan<- struct{}, error) {
 	leaseResp, err := s.cli.Grant(context.Background(), ttl)
 	if err != nil {
 		return nil, err
 	}
 
-	_, err = s.cli.Put(context.Background(), "/"+serviceName+"/"+addr, addr, clientv3.WithLease(leaseResp.ID))
+	// 使用 /services/ 作为公共前缀，方便统一发现
+	key := "/services/" + serviceName + "/" + addr
+	_, err = s.cli.Put(context.Background(), key, addr, clientv3.WithLease(leaseResp.ID))
 	if err != nil {
 		return nil, err
 	}
@@ -47,11 +50,12 @@ func (s *ServiceDiscovery) Register(serviceName, addr string, ttl int64) (chan<-
 		for {
 			select {
 			case <-stop:
+				// 停止续约并撤销租约
+				s.revoke(leaseResp.ID)
 				return
 			case _, ok := <-keepAliveCh:
 				if !ok {
-					// Lease expired or was revoked.
-					s.revoke(serviceName, addr)
+					// 租约过期或被撤销
 					return
 				}
 			}
@@ -61,15 +65,16 @@ func (s *ServiceDiscovery) Register(serviceName, addr string, ttl int64) (chan<-
 	return stop, nil
 }
 
-// revoke revokes a service from etcd.
-func (s *ServiceDiscovery) revoke(serviceName, addr string) {
-	// The lease will be automatically revoked by etcd, but we can also manually delete the key.
-	s.cli.Delete(context.Background(), "/"+serviceName+"/"+addr)
+// revoke 撤销一个租约。
+func (s *ServiceDiscovery) revoke(leaseID clientv3.LeaseID) {
+	// 撤销租约将自动删除所有关联的键
+	s.cli.Revoke(context.Background(), leaseID)
 }
 
-// Discover discovers a service from etcd.
+// Discover 发现一个特定名称的服务的所有实例地址。
 func (s *ServiceDiscovery) Discover(serviceName string) ([]string, error) {
-	resp, err := s.cli.Get(context.Background(), "/"+serviceName, clientv3.WithPrefix())
+	key := "/services/" + serviceName + "/"
+	resp, err := s.cli.Get(context.Background(), key, clientv3.WithPrefix())
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +87,31 @@ func (s *ServiceDiscovery) Discover(serviceName string) ([]string, error) {
 	return addrs, nil
 }
 
-// Close closes the etcd client.
+// DiscoverServices 发现给定前缀下的所有服务。
+// 返回一个 map，键是服务名，值是该服务的第一个实例地址。
+func (s *ServiceDiscovery) DiscoverServices(prefix string) (map[string]string, error) {
+	resp, err := s.cli.Get(context.Background(), prefix, clientv3.WithPrefix())
+	if err != nil {
+		return nil, err
+	}
+
+	services := make(map[string]string)
+	for _, ev := range resp.Kvs {
+		key := string(ev.Key)
+		trimmedKey := strings.TrimPrefix(key, prefix)
+		parts := strings.SplitN(trimmedKey, "/", 2)
+		if len(parts) > 0 {
+			serviceName := parts[0]
+			if _, exists := services[serviceName]; !exists {
+				services[serviceName] = string(ev.Value)
+			}
+		}
+	}
+
+	return services, nil
+}
+
+// Close 关闭 etcd 客户端。
 func (s *ServiceDiscovery) Close() error {
 	return s.cli.Close()
 }

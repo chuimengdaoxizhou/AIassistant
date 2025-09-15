@@ -10,6 +10,7 @@ import (
 	"Jarvis_2.0/backend/go/internal/database/kafka"
 	"Jarvis_2.0/backend/go/internal/database/minio"
 	"Jarvis_2.0/backend/go/internal/database/mongo"
+	"Jarvis_2.0/backend/go/internal/discovery/etcd"
 	"Jarvis_2.0/backend/go/internal/llm"
 	"Jarvis_2.0/backend/go/internal/mcp"
 	"Jarvis_2.0/backend/go/internal/models"
@@ -36,27 +37,35 @@ func main() {
 	logger.Init(logLevel)
 	serviceLogger := logger.New("AgentService", "", "")
 
-	// 初始化服务发现和工具定义
-	registry, err := agent.GetInstance(cfg.Databases.Etcd.Endpoints)
+	// --- 1. 初始化服务发现并发现所有子Agent ---
+	sd, err := etcd.NewServiceDiscovery(cfg.Databases.Etcd.Endpoints)
 	if err != nil {
-		serviceLogger.WithError(models.ErrorInfo{Message: err.Error()}).Fatal("Failed to create Etcd registry instance")
+		serviceLogger.WithError(models.ErrorInfo{Message: err.Error()}).Fatal("Failed to create service discovery client")
 	}
-	defer registry.Close()
+	defer sd.Close()
 
-	// 获取本地MCP工具的元数据
-	// 注意：由于选择的 Registry 没有提供列出所有子Agent的功能，此处无法在启动时发现它们。
-	// 只有MCP工具会被注入到LLM中作为可用工具。
-	mcpToolsMetadata := mcp.GetTools()
-	toolDeclarations := models.ConvertAgentMetadataToFunctionDeclarations(mcpToolsMetadata)
-	serviceLogger.Info(fmt.Sprintf("Loaded %d MCP tools for the LLM.", len(mcpToolsMetadata)))
+	registry := agent.NewDistributedRegistry(sd)
+	if err := registry.DiscoverAndCacheAgents(); err != nil {
+		serviceLogger.WithError(models.ErrorInfo{Message: err.Error()}).Warn("Failed to discover agents from etcd, proceeding with limited capabilities.")
+	}
 
-	// 初始化带工具的LLM客户端 ---
+	// --- 2. 准备工具并初始化LLM客户端 ---
+	// 获取所有工具的元数据 (统一为 proto 类型)
+	subAgentProtoMetadata := registry.GetAgentMetadata()
+	mcpToolsProtoMetadata := mcp.GetTools()
+	allToolsProtoMetadata := append(subAgentProtoMetadata, mcpToolsProtoMetadata...)
+
+	// 将所有元数据一次性转换为LLM的FunctionDeclaration
+	toolDeclarations := models.ConvertAgentMetadataToFunctionDeclarations(allToolsProtoMetadata)
+
+	serviceLogger.Info(fmt.Sprintf("Loaded %d tools for the LLM: %d sub-agents and %d MCP tools.", len(allToolsProtoMetadata), len(subAgentProtoMetadata), len(mcpToolsProtoMetadata)))
+
 	llmClient, err := llm.NewClient(cfg.LLM, toolDeclarations)
 	if err != nil {
 		serviceLogger.WithError(models.ErrorInfo{Message: err.Error()}).Fatal("Failed to create LLM client")
 	}
 
-	// 3. 初始化服务依赖
+	// --- 3. 初始化其他服务依赖 ---
 	kafkaClient, err := kafka.GetClient(&cfg.Databases.Kafka)
 	if err != nil {
 		serviceLogger.WithError(models.ErrorInfo{Message: err.Error()}).Fatal("Failed to create Kafka client")

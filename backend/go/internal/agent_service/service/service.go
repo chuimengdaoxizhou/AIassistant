@@ -10,8 +10,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	"sync"
 	"time"
 )
@@ -21,13 +19,13 @@ const maxIterations = 10 // 定义 ReAct 循环的最大次数
 // AgentService 封装了 MainAgent 的核心逻辑。
 type AgentService struct {
 	llmClient    llm.LLM
-	registry     *agent.Registry // 使用单例 Registry 指针
+	registry     agent.Registry // 依赖接口，而不是具体实现
 	logPublisher *kafka.LogPublisher
 	taskStore    TaskStore
 }
 
 // NewAgentService 创建一个新的 AgentService 实例。
-func NewAgentService(llmClient llm.LLM, registry *agent.Registry, logPublisher *kafka.LogPublisher, taskStore TaskStore) *AgentService {
+func NewAgentService(llmClient llm.LLM, registry agent.Registry, logPublisher *kafka.LogPublisher, taskStore TaskStore) *AgentService {
 	return &AgentService{
 		llmClient:    llmClient,
 		registry:     registry,
@@ -132,16 +130,11 @@ func (s *AgentService) executeFunctionCalls(ctx context.Context, originalTask *v
 
 		fc := part.FunctionCall
 
-		// 使用 DiscoverAgents 动态发现子 Agent
-		addresses, err := s.registry.DiscoverAgents(fc.Name)
-		// 如果发现过程出错，或者没有找到任何地址，则判定为 MCP 工具
-		if err != nil || len(addresses) == 0 {
-			if err != nil {
-				appLogger.WithError(models.ErrorInfo{Message: err.Error()}).Warn(fmt.Sprintf("Failed to discover agent '%s', assuming it is an MCP tool.", fc.Name))
-			} else {
-				appLogger.WithPayload(map[string]interface{}{"tool_name": fc.Name}).Warn("Tool not found via discovery. Assuming it is an MCP tool.")
-			}
-
+		// 从缓存的注册中心获取客户端
+		client, found := s.registry.GetAgentClient(fc.Name)
+		if !found {
+			// 如果在缓存中找不到，则判定为MCP工具
+			appLogger.WithPayload(map[string]interface{}{"tool_name": fc.Name}).Warn("Tool not found in registry. Assuming it is an MCP tool.")
 			s.logProgress(ctx, originalTask.TaskId, originalTask.CorrelationId, models.StatusCallingMCPTool, fmt.Sprintf("决定调用 MCP 工具: %s", fc.Name), fc)
 
 			protoTask, err := models.ConvertModelsToProtoTask(originalTask, models.Content{Role: models.SpeakerAssistant, Parts: []*models.Part{{FunctionCall: fc}}}, "mcp_tool_handler", fc.Name)
@@ -151,41 +144,31 @@ func (s *AgentService) executeFunctionCalls(ctx context.Context, originalTask *v
 			return nil, &MCPError{Task: protoTask}
 		}
 
-		// 如果找到了地址，则判定为子Agent，并异步执行
+		// 如果是子Agent，则异步执行
 		wg.Add(1)
-		go func(call *models.FunctionCall, addr string) {
+		go func(call *models.FunctionCall, client v1.AgentServiceClient) {
 			defer wg.Done()
-			appLogger.Info(fmt.Sprintf("Handling sub-agent call: %s at %s", call.Name, addr))
+			appLogger.Info(fmt.Sprintf("Handling sub-agent call: %s", call.Name))
 			s.logProgress(ctx, originalTask.TaskId, originalTask.CorrelationId, models.StatusCallingSubAgent, fmt.Sprintf("决定调用子 Agent: %s", call.Name), call)
 
 			var observation map[string]any
 
-			// 动态建立gRPC连接
-			conn, err := grpc.Dial(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+			subTaskContent := models.Content{
+				Role:  models.SpeakerUser,
+				Parts: []*models.Part{{Text: call.ArgsToString()}},
+			}
+
+			subTask, err := models.ConvertModelsToProtoTask(originalTask, subTaskContent, call.Name, fmt.Sprintf("Sub-task for %s", call.Name))
 			if err != nil {
-				appLogger.WithError(models.ErrorInfo{Message: err.Error()}).Error(fmt.Sprintf("Failed to dial sub-agent %s", call.Name))
-				observation = map[string]any{"error": fmt.Sprintf("failed to connect to sub-agent: %s", call.Name)}
+				appLogger.WithError(models.ErrorInfo{Message: err.Error()}).Error("Failed to create sub-task")
+				observation = map[string]any{"error": "failed to create sub-task"}
 			} else {
-				defer conn.Close()
-				client := v1.NewAgentServiceClient(conn)
-
-				subTaskContent := models.Content{
-					Role:  models.SpeakerUser,
-					Parts: []*models.Part{{Text: call.ArgsToString()}},
-				}
-
-				subTask, err := models.ConvertModelsToProtoTask(originalTask, subTaskContent, call.Name, fmt.Sprintf("Sub-task for %s", call.Name))
+				resultTask, err := client.ExecuteTask(ctx, subTask)
 				if err != nil {
-					appLogger.WithError(models.ErrorInfo{Message: err.Error()}).Error("Failed to create sub-task")
-					observation = map[string]any{"error": "failed to create sub-task"}
+					appLogger.WithError(models.ErrorInfo{Message: err.Error()}).Error("Sub-agent gRPC execution failed")
+					observation = map[string]any{"error": err.Error()}
 				} else {
-					resultTask, err := client.ExecuteTask(ctx, subTask)
-					if err != nil {
-						appLogger.WithError(models.ErrorInfo{Message: err.Error()}).Error("Sub-agent gRPC execution failed")
-						observation = map[string]any{"error": err.Error()}
-					} else {
-						observation = map[string]any{"output": models.ConvertProtoToModelsContent(resultTask.Content)}
-					}
+					observation = map[string]any{"output": models.ConvertProtoToModelsContent(resultTask.Content)}
 				}
 			}
 
@@ -197,7 +180,7 @@ func (s *AgentService) executeFunctionCalls(ctx context.Context, originalTask *v
 			}
 			s.logProgress(ctx, originalTask.TaskId, originalTask.CorrelationId, models.StatusObserving, fmt.Sprintf("从工具 %s 获得观察结果", call.Name), obsContent)
 			observationChan <- obsContent
-		}(fc, addresses[0]) // 使用发现的第一个地址
+		}(fc, client)
 	}
 
 	wg.Wait()
@@ -238,7 +221,7 @@ type TaskStore interface {
 	GetTasksByParentID(ctx context.Context, parentID string) ([]*v1.AgentTask, error)
 }
 
-// --- 任务树相关功能保持不变 ---
+// TaskNode --- 任务树相关功能保持不变 ---
 type TaskNode struct {
 	Task     *v1.AgentTask `json:"task"`
 	Children []*TaskNode   `json:"children"`
