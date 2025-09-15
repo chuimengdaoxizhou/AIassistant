@@ -2,12 +2,56 @@ package models
 
 import (
 	v1 "Jarvis_2.0/api/proto/v1"
+	"github.com/google/generative-ai-go/genai"
 	"github.com/google/uuid"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 	"time"
 )
+
+// ConvertAgentMetadataToFunctionDeclarations 将内部 AgentMetadata 列表转换为 Gemini FunctionDeclaration 指针列表。
+func ConvertAgentMetadataToFunctionDeclarations(metadataList []AgentMetadata) []*genai.FunctionDeclaration {
+	if metadataList == nil {
+		return nil
+	}
+	declarations := make([]*genai.FunctionDeclaration, 0, len(metadataList))
+	for _, meta := range metadataList {
+		declarations = append(declarations, &genai.FunctionDeclaration{
+			Name:        meta.Name,
+			Description: meta.Description,
+			Parameters:  convertSchemaToGenaiSchema(meta.InputSchema),
+		})
+	}
+	return declarations
+}
+
+// convertSchemaToGenaiSchema 递归地将内部 Schema 转换为 Gemini Schema。
+func convertSchemaToGenaiSchema(schema *Schema) *genai.Schema {
+	if schema == nil {
+		return nil
+	}
+
+	genaiSchema := &genai.Schema{
+		Type:        genai.Type(schema.Type),
+		Description: schema.Description,
+		Enum:        schema.Enum,
+		Required:    schema.Required,
+	}
+
+	if schema.Properties != nil {
+		genaiSchema.Properties = make(map[string]*genai.Schema)
+		for k, v := range schema.Properties {
+			genaiSchema.Properties[k] = convertSchemaToGenaiSchema(v)
+		}
+	}
+
+	if schema.Items != nil {
+		genaiSchema.Items = convertSchemaToGenaiSchema(schema.Items)
+	}
+
+	return genaiSchema
+}
 
 // ConvertProtoToModelsContent 将 protobuf 的 Content 转换为 models 的 Content。
 func ConvertProtoToModelsContent(protoContent []*v1.Content) []Content {
@@ -132,7 +176,8 @@ func ConvertModelsToProtoFunctionCall(modelFC *FunctionCall) (*v1.FunctionCall, 
 		Id:   modelFC.ID,
 		Name: modelFC.Name,
 		Args: args,
-	}, nil
+	},
+	 nil
 }
 
 // ConvertModelsToProtoTask 根据父任务为子任务创建一个新的 AgentTask。
@@ -200,7 +245,7 @@ func ConvertModelsToProtoBlob(modelBlob *Blob) *v1.Blob {
 	return &v1.Blob{
 		DisplayName: modelBlob.DisplayName,
 		Data:        modelBlob.Data,
-		MimeType:    modelBlob.MIMEType,
+		MimeType:    modelBlob.MimeType,
 	}
 }
 

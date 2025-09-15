@@ -1,14 +1,19 @@
 package main
 
 import (
-	"log"
-
 	"Jarvis_2.0/backend/go/pkg/tools/edit_office/word_handler"
+	"flag"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"log"
 )
 
 func main() {
+	// Define command-line flags
+	transport := flag.String("transport", "stdio", "Transport method: stdio, sse, or httpstream")
+	port := flag.String("port", "8082", "Port for HTTP-based transports (sse, httpstream)")
+	flag.Parse()
+
 	h, err := word_handler.NewWordHandler()
 	if err != nil {
 		log.Fatalf("failed to create word handler: %v", err)
@@ -38,8 +43,36 @@ func main() {
 		mcp.WithNumber("cols", mcp.Required(), mcp.Description("Number of columns for the new table.")),
 	), h.HandleAddTable)
 
-	log.Println("Starting Word MCP server on :8082")
-	if err := server.ServeStdio(s); err != nil {
-		log.Fatalf("Server error: %v\n", err)
+	// Start server based on transport selection
+	switch *transport {
+	case "sse":
+		log.Printf("Starting Word MCP server with SSE transport on port %s", *port)
+		sseServer := server.NewSSEServer(s)
+		if err := sseServer.Start(":" + *port); err != nil {
+			log.Fatalf("SSE server error: %v", err)
+		}
+	case "httpstream":
+		log.Printf("Starting Word MCP server with StreamableHTTP transport on port %s", *port)
+		httpServer := server.NewStreamableHTTPServer(s)
+		if err := httpServer.Start(":" + *port); err != nil {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	case "stdio":
+		log.Println("Starting Word MCP server with STDIO transport")
+		if err := server.ServeStdio(s); err != nil {
+			log.Fatalf("STDIO server error: %v", err)
+		}
+	default:
+		log.Fatalf("Unknown transport: %s. Use stdio, sse, or httpstream", *transport)
 	}
 }
+
+// STDIO transport (default)
+//go run main.go
+//go run main.go -transport=stdio
+//
+// SSE transport on port 8082
+//go run main.go -transport=sse -port=8082
+//
+// StreamableHTTP transport on port 9000
+//go run main.go -transport=httpstream -port=9000

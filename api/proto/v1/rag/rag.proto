@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package v1.rag;
+
+option go_package = "Jarvis_2.0/api/proto/v1/rag";
+
+service RagService {
+  // Indexes a list of files or URLs into a specific user's folder.
+  rpc Index(IndexRequest) returns (stream IndexResponse);
+
+  // Performs a query against documents in specific folders for a user.
+  rpc Query(QueryRequest) returns (QueryResponse);
+
+  // Creates a new folder for a user.
+  rpc CreateFolder(CreateFolderRequest) returns (FolderResponse);
+
+  // Lists all folders for a user.
+  rpc ListFolders(ListFoldersRequest) returns (ListFoldersResponse);
+}
+
+// IndexRequest contains the information for the documents to be indexed.
+message IndexRequest {
+  string user_id = 1;   // The ID of the user performing the action.
+  string folder_id = 2; // The ID of the folder to index into.
+  repeated string paths = 3; // A list of local file paths or remote URLs.
+  bool reindex = 4;     // If true, forces re-indexing.
+}
+
+// IndexResponse streams the progress of the indexing job.
+message IndexResponse {
+  string message = 1;
+  int32 progress = 2;
+}
+
+// QueryRequest contains the user's query.
+message QueryRequest {
+  string user_id = 1; // The ID of the user performing the query.
+  string query = 2;   // The question to be answered.
+  // A list of folder IDs to search within. If empty, searches all folders for the user.
+  repeated string folder_ids = 3;
+}
+
+// RetrievedDocument represents a chunk of a source document relevant to the query.
+message RetrievedDocument {
+  string id = 1;
+  string text = 2;
+  float score = 3;
+  map<string, string> metadata = 4;
+}
+
+// QueryResponse contains the answer and the source documents.
+message QueryResponse {
+  string answer = 1;
+  repeated RetrievedDocument sources = 2;
+}
+
+// A folder object.
+message Folder {
+  string id = 1;
+  string name = 2;
+  string created_at = 3;
+}
+
+// Request to create a new folder.
+message CreateFolderRequest {
+  string user_id = 1;
+  string folder_name = 2;
+}
+
+// Response containing a single folder.
+message FolderResponse {
+  Folder folder = 1;
+}
+
+// Request to list folders for a user.
+message ListFoldersRequest {
+  string user_id = 1;
+}
+
+// Response containing a list of folders.
+message ListFoldersResponse {
+  repeated Folder folders = 1;
+}

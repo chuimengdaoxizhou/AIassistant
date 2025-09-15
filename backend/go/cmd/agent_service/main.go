@@ -1,91 +1,110 @@
 package main
 
 import (
-	"Jarvis_2.0/api/proto/v1"
 	"Jarvis_2.0/backend/go/internal/agent"
-	"Jarvis_2.0/backend/go/internal/agent_service/api"
+	"Jarvis_2.0/backend/go/internal/agent_service/consumer"
+	"Jarvis_2.0/backend/go/internal/agent_service/publisher"
 	"Jarvis_2.0/backend/go/internal/agent_service/service"
+	"Jarvis_2.0/backend/go/internal/agent_service/store"
 	"Jarvis_2.0/backend/go/internal/config"
 	"Jarvis_2.0/backend/go/internal/database/kafka"
-	"Jarvis_2.0/backend/go/internal/discovery/etcd"
+	"Jarvis_2.0/backend/go/internal/database/minio"
+	"Jarvis_2.0/backend/go/internal/database/mongo"
 	"Jarvis_2.0/backend/go/internal/llm"
-	grpcserver "Jarvis_2.0/backend/go/pkg/grpc"
+	"Jarvis_2.0/backend/go/internal/mcp"
+	"Jarvis_2.0/backend/go/internal/models"
 	"Jarvis_2.0/backend/go/pkg/logger"
+	"context"
 	"fmt"
 	"github.com/sirupsen/logrus"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 func main() {
-	// 1. 加载配置
-	cfg, err := config.LoadConfig("config.yaml")
+	cfg, err := config.LoadConfig("backend/go/internal/config/config.yaml")
 	if err != nil {
-		log.Fatalf("failed to load configuration: %v", err)
+		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// 2. 初始化 Logger
-	level, err := logrus.ParseLevel(cfg.Logger.Level)
+	logLevel, err := logrus.ParseLevel(cfg.Logger.Level)
 	if err != nil {
-		level = logrus.InfoLevel
+		log.Fatalf("Invalid logger level: %v", err)
 	}
-	logger.Init(level)
-	appLogger := logger.New("agent_service", "", "")
-	appLogger.Info("Logger initialized for Agent Service")
+	logger.Init(logLevel)
+	serviceLogger := logger.New("AgentService", "", "")
 
-	// 3. 初始化 Kafka 客户端和日志发布器
+	// 初始化服务发现和工具定义
+	registry, err := agent.GetInstance(cfg.Databases.Etcd.Endpoints)
+	if err != nil {
+		serviceLogger.WithError(models.ErrorInfo{Message: err.Error()}).Fatal("Failed to create Etcd registry instance")
+	}
+	defer registry.Close()
+
+	// 获取本地MCP工具的元数据
+	// 注意：由于选择的 Registry 没有提供列出所有子Agent的功能，此处无法在启动时发现它们。
+	// 只有MCP工具会被注入到LLM中作为可用工具。
+	mcpToolsMetadata := mcp.GetTools()
+	toolDeclarations := models.ConvertAgentMetadataToFunctionDeclarations(mcpToolsMetadata)
+	serviceLogger.Info(fmt.Sprintf("Loaded %d MCP tools for the LLM.", len(mcpToolsMetadata)))
+
+	// 初始化带工具的LLM客户端 ---
+	llmClient, err := llm.NewClient(cfg.LLM, toolDeclarations)
+	if err != nil {
+		serviceLogger.WithError(models.ErrorInfo{Message: err.Error()}).Fatal("Failed to create LLM client")
+	}
+
+	// 3. 初始化服务依赖
 	kafkaClient, err := kafka.GetClient(&cfg.Databases.Kafka)
 	if err != nil {
-		appLogger.Fatal(fmt.Sprintf("Failed to create kafka client: %v", err))
+		serviceLogger.WithError(models.ErrorInfo{Message: err.Error()}).Fatal("Failed to create Kafka client")
 	}
+	defer kafkaClient.Close()
+
 	logPublisher := kafka.NewLogPublisher(kafkaClient)
-	defer func(logPublisher *kafka.LogPublisher) {
-		err := logPublisher.Close()
-		if err != nil {
-			appLogger.Error(fmt.Sprintf("Failed to close log publisher cleanly: %v", err))
-		}
-	}(logPublisher)
-	appLogger.Info("Kafka log publisher initialized")
 
-	// 4. 初始化 etcd 服务发现客户端
-	sd, err := etcd.NewServiceDiscovery(cfg.Databases.Etcd.Endpoints)
+	mongoClient, err := mongo.GetClient(&cfg.Databases.MongoDB)
 	if err != nil {
-		appLogger.Fatal(fmt.Sprintf("Failed to create service discovery client: %v", err))
+		serviceLogger.WithError(models.ErrorInfo{Message: err.Error()}).Fatal("Failed to connect to MongoDB")
 	}
+	db := mongoClient.Database(cfg.Databases.MongoDB.Database)
 
-	// 5. 初始化 DistributedRegistry 并发现子 Agent
-	distributedRegistry := agent.NewDistributedRegistry(sd)
-	if err := distributedRegistry.DiscoverAndCacheAgents(); err != nil {
-		appLogger.Fatal(fmt.Sprintf("Failed to discover agents: %v", err))
-	}
-	appLogger.Info("Distributed agent registry initialized and agents discovered")
-
-	// 6. 初始化 LLM 客户端 (以 Gemini 为例)
-	llmClient, err := llm.NewLLM("gemini", cfg.LLM.Gemini.Model, cfg.LLM.Gemini.APIKey, "", nil)
+	minioClient, err := minio.GetClient(&cfg.Databases.MinIO)
 	if err != nil {
-		appLogger.Fatal(fmt.Sprintf("Failed to create LLM client: %v", err))
+		serviceLogger.WithError(models.ErrorInfo{Message: err.Error()}).Fatal("Failed to connect to MinIO")
 	}
-	appLogger.Info("LLM client initialized")
 
-	// 7. 初始化 AgentService
-	agentSvc := service.NewAgentService(llmClient, distributedRegistry, logPublisher, nil)
-	appLogger.Info("Agent service core initialized")
+	taskUpdater := store.NewMongoTaskUpdater(db, cfg.TaskIngestion.MongoCollection)
+	contentProcessor := store.NewContentProcessor(minioClient, serviceLogger)
 
-	// 8. 初始化 gRPC 服务器
-	grpcServer, err := grpcserver.NewServer(cfg)
+	// --- 4. 初始化核心服务和协调器 ---
+	agentService := service.NewAgentService(llmClient, registry, logPublisher, nil)
+	resultPublisher := publisher.NewResultPublisher(cfg.Databases.Kafka.Brokers, cfg.TaskIngestion.KafkaResultsTopic, serviceLogger)
+	coordinator := service.NewCoordinator(agentService, resultPublisher, taskUpdater, contentProcessor, serviceLogger)
+
+	// --- 5. 启动Kafka消费者 ---
+	taskConsumer, err := consumer.NewTaskConsumer(cfg.Databases.Kafka.Brokers, cfg.TaskIngestion.KafkaTasksTopic, "agent-service-group", serviceLogger)
 	if err != nil {
-		appLogger.Fatal(fmt.Sprintf("Failed to create gRPC server: %v", err))
+		serviceLogger.WithError(models.ErrorInfo{Message: err.Error()}).Fatal("Failed to create Kafka task consumer")
 	}
 
-	// 9. 注册 gRPC 处理器
-	agentGRPCHandler := api.NewAgentServerHandler(agentSvc)
-	v1.RegisterAgentServiceServer(grpcServer.GetGRPCServer(), agentGRPCHandler)
-	appLogger.Info("gRPC handler registered")
+	ctx, cancel := context.WithCancel(context.Background())
+	taskConsumer.Start(ctx, coordinator.ProcessTask)
+	serviceLogger.Info("Agent service coordinator started")
 
-	// 10. 启动 gRPC 服务器
-	// TODO: Get port from config
-	grpcPort := ":9090"
-	appLogger.Info("Starting gRPC server on port " + grpcPort)
-	if err := grpcServer.ListenAndServe(); err != nil {
-		appLogger.Fatal(fmt.Sprintf("Failed to start gRPC server: %v", err))
-	}
+	// --- 6. 优雅关停 ---
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	serviceLogger.Info("Shutting down agent service...")
+	cancel()
+	logPublisher.Close()
+	resultPublisher.Close()
+	taskConsumer.Close()
+	mongo.Close(context.Background())
+	minio.Close()
+	serviceLogger.Info("Agent service gracefully stopped")
 }

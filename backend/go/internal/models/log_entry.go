@@ -10,7 +10,7 @@ type LogEntry struct {
 	// TraceID 用于将跨越多个服务的单个请求串联起来，便于进行分布式追踪。
 	TraceID string `json:"trace_id,omitempty"`
 
-	// UserID 标识了与此日志事件相关的用户（如果适用）。
+	// UserID 标识了与此日志事件相关的用户。
 	UserID string `json:"user_id,omitempty"`
 
 	// RequestInfo 包含了触发此日志的 HTTP 请求的详细信息。
@@ -34,7 +34,7 @@ type RequestInfo struct {
 // ErrorInfo 存储了关于错误的结构化信息。
 type ErrorInfo struct {
 	Message    string `json:"message"`
-	Stack      string `json:"stack,omitempty"`      // 错误的堆栈信息
+	Stack      string `json:"stack,omitempty"`       // 错误的堆栈信息
 	Type       string `json:"type,omitempty"`        // 错误的类型，例如 "database_error", "validation_error"
 	StatusCode int    `json:"status_code,omitempty"` // 相关的HTTP状态码
 }

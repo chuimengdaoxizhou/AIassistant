@@ -1,40 +1,34 @@
 package llm
 
 import (
+	"Jarvis_2.0/backend/go/internal/config"
 	"Jarvis_2.0/backend/go/internal/models"
 	"context"
 	"fmt"
-
-	"github.com/mark3labs/mcp-go/mcp"
+	"github.com/google/generative-ai-go/genai"
 )
 
-// LLM 是大型语言模型的接口。
+// LLM 定义了所有大型语言模型客户端必须实现的通用接口。
 type LLM interface {
 	GenerateContent(ctx context.Context, req *models.GenerateContentRequest) (*models.GenerateContentResponse, error)
 	GenerateContentStream(ctx context.Context, req *models.GenerateContentRequest) (<-chan *models.GenerateContentResponse, error)
 }
 
-// NewLLM 根据提供商创建新的 LLM 客户端。
-// 它接受一个可选的 []*mcp.Tool 配置，并会根据 provider 自动转换为相应的格式。
-func NewLLM(provider, model, apiKey, baseURL string, mcpTools []*mcp.Tool) (LLM, error) {
-	switch provider {
+// NewClient 是一个工厂函数，根据提供的配置创建并返回一个实现了 LLM 接口的客户端。
+// 它现在接收一个工具声明列表，并将其注入到LLM客户端中，使模型能够感知并调用这些工具。
+func NewClient(cfg config.LLMConfig, tools []*genai.FunctionDeclaration) (LLM, error) {
+	switch cfg.Provider {
 	case "gemini":
-		geminiTools, err := ConvertMCPToolsToGemini(mcpTools)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert tools for gemini: %w", err)
+		// 假设配置文件中的第一个模型是我们要使用的模型。
+		if len(cfg.Models) == 0 {
+			return nil, fmt.Errorf("no model configured for gemini provider")
 		}
-		return NewGemini(context.Background(), model, apiKey, geminiTools)
-	case "openai":
-		openaiTools, err := ConvertMCPToolsToOpenAI(mcpTools)
-		if err != nil {
-			return nil, fmt.Errorf("failed to convert tools for openai: %w", err)
-		}
-		return NewOpenAI(model, apiKey, openaiTools)
-	case "huggingface":
-		return NewHuggingFace(model, apiKey, baseURL)
-	case "ollama":
-		return NewOllama(model, baseURL)
+		modelName := cfg.Models[0].Name
+		apiKey := cfg.Models[0].APIKey
+		return NewGemini(context.Background(), modelName, apiKey, tools)
+	// case "openai":
+	//     return NewOpenAI(...)
 	default:
-		return nil, fmt.Errorf("unsupported provider: %s", provider)
+		return nil, fmt.Errorf("unsupported LLM provider: %s", cfg.Provider)
 	}
 }

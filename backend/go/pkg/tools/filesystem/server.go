@@ -2,12 +2,68 @@ package filesystem
 
 import (
 	"Jarvis_2.0/backend/go/pkg/tools/filesystem/handler"
+	"flag"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"log"
 )
 
 // Version 是服务的版本号
 var Version = "2.0"
+
+//STDIO transport (default) with current directory access
+//go run main.go
+//go run main.go -transport=stdio -allowed-dirs="/home/user/documents"
+//
+//SSE transport on port 8084
+//go run main.go -transport=sse -port=8084 -allowed-dirs="/home/user/projects"
+//
+//StreamableHTTP transport on port 9000
+//go run main.go -transport=httpstream -port=9000 -allowed-dirs="/tmp"
+
+func main() {
+	// Define command-line flags
+	transport := flag.String("transport", "stdio", "Transport method: stdio, sse, or httpstream")
+	port := flag.String("port", "8084", "Port for HTTP-based transports (sse, httpstream)")
+	allowedDirs := flag.String("allowed-dirs", ".", "Comma-separated list of allowed directories")
+	flag.Parse()
+
+	// Parse allowed directories
+	dirs := []string{*allowedDirs}
+	if *allowedDirs != "." {
+		// You might want to implement CSV parsing here for multiple directories
+		// For now, using single directory
+	}
+
+	// Create filesystem server
+	s, err := NewFilesystemServer(dirs)
+	if err != nil {
+		log.Fatalf("failed to create filesystem server: %v", err)
+	}
+
+	// Start server based on transport selection
+	switch *transport {
+	case "sse":
+		log.Printf("Starting Filesystem MCP server with SSE transport on port %s", *port)
+		sseServer := server.NewSSEServer(s)
+		if err := sseServer.Start(":" + *port); err != nil {
+			log.Fatalf("SSE server error: %v", err)
+		}
+	case "httpstream":
+		log.Printf("Starting Filesystem MCP server with StreamableHTTP transport on port %s", *port)
+		httpServer := server.NewStreamableHTTPServer(s)
+		if err := httpServer.Start(":" + *port); err != nil {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	case "stdio":
+		log.Println("Starting Filesystem MCP server with STDIO transport")
+		if err := server.ServeStdio(s); err != nil {
+			log.Fatalf("STDIO server error: %v", err)
+		}
+	default:
+		log.Fatalf("Unknown transport: %s. Use stdio, sse, or httpstream", *transport)
+	}
+}
 
 // NewFilesystemServer 创建一个新的 MCP 文件系统服务。
 // allowedDirs 参数指定了允许访问的目录列表，以确保安全。

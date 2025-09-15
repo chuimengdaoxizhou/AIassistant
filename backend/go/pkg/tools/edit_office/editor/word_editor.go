@@ -106,13 +106,8 @@ type Bookmark struct {
 	b document.Bookmark
 }
 
-// Hyperlink wraps a unioffice hyperlink.
-//type Hyperlink struct {
-//	h document.HyperLink // 注意类型名是 HyperLink
-//}
-
 type Hyperlink struct {
-	h document.HyperLink // 注意是 HyperLink 不是 Hyperlink
+	h document.HyperLink
 }
 
 // init initializes the unioffice license.

@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 
+	"Jarvis_2.0/backend/go/pkg/tools/edit_office/editor"
 	"github.com/mark3labs/mcp-go/mcp"
-	"github.com/z-Wind/Jarvis_2.0/backend/go/pkg/tools/edit_office/editor"
 )
 
-// PPTHandler handles all PowerPoint-related tool requests.	ype PPTHandler struct{}
+// PPTHandler handles all PowerPoint-related tool requests.
+type PPTHandler struct{}
 
 // NewPPTHandler creates a new PPTHandler.
 func NewPPTHandler() (*PPTHandler, error) {

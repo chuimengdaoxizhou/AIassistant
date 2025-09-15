@@ -154,6 +154,15 @@ type AppConfig struct {
 	Logger     LoggerConfig    `yaml:"logger"`    // 日志记录器配置
 	Databases  DatabaseConfigs `yaml:"databases"` // 数据库配置
 	Middleware MiddlewareConfig `yaml:"middleware"` // 中间件配置
+	TaskIngestion TaskIngestionServiceConfig `yaml:"task_ingestion"` // 任务接收服务配置
+}
+
+// TaskIngestionServiceConfig 定义了任务接收服务的配置。
+type TaskIngestionServiceConfig struct {
+	ServerAddress    string `yaml:"server_address"`
+	KafkaTasksTopic  string `yaml:"kafka_tasks_topic"`
+	KafkaResultsTopic string `yaml:"kafka_results_topic"`
+	MongoCollection  string `yaml:"mongo_collection"`
 }
 
 // LLMConfig 包含了不同LLM提供商的配置。

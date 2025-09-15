@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+)
 
 // SpeakerRole 定义了消息发送者的角色。
 type SpeakerRole string
@@ -28,6 +32,19 @@ type Content struct {
 	Parts []*Part `json:"parts,omitempty"`
 	// 可选。内容的生产者。必须是 'user' 或 'model'。
 	Role SpeakerRole `json:"role,omitempty"`
+}
+
+// HasFunctionCall 检查 Content 中是否包含 FunctionCall。
+func (c *Content) HasFunctionCall() bool {
+	if c == nil {
+		return false
+	}
+	for _, part := range c.Parts {
+		if part.FunctionCall != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // GenerateContentRequest 定义了生成内容的请求结构。
@@ -123,12 +140,24 @@ type ExecutableCode struct {
 
 // FunctionCall 包含了模型预测的函数调用信息。
 type FunctionCall struct {
-	// 可选。函数调用的唯一 ID。如果已填充，客户端将执行 `function_call` 并返回具有匹配 `id` 的响应。
+	// 可选。函数调用的唯一 ID。
 	ID string `json:"id,omitempty"`
 	// 可选。JSON 对象格式的函数参数和值。有关参数详细信息，请参阅 [FunctionDeclaration.parameters]。
 	Args map[string]any `json:"args,omitempty"`
 	// 必填。要调用的函数名称。与 [FunctionDeclaration.Name] 匹配。
 	Name string `json:"name,omitempty"`
+}
+
+// ArgsToString 将 FunctionCall 的参数转换为 JSON 字符串。
+func (fc *FunctionCall) ArgsToString() string {
+	if fc == nil || len(fc.Args) == 0 {
+		return "{}"
+	}
+	bytes, err := json.Marshal(fc.Args)
+	if err != nil {
+		return fmt.Sprintf("{\"error\":\"failed to marshal args: %v\"}", err)
+	}
+	return string(bytes)
 }
 
 // FunctionResponseScheduling 定义了函数响应的调度方式。

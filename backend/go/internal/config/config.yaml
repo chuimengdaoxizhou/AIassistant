@@ -184,3 +184,10 @@ databases:
     topics:
       - "jarvis-events"
       - "jarvis-tasks"
+
+# 任务接收服务配置
+task_ingestion:
+  server_address: ":8081"
+  kafka_tasks_topic: "agent_tasks"
+  kafka_results_topic: "agent_task_results"
+  mongo_collection: "tasks"

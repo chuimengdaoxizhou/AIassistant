@@ -9,9 +9,39 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/milvus-io/milvus-sdk-go/v2/client"
 	"github.com/milvus-io/milvus-sdk-go/v2/entity"
 )
+
+// InsertBatch inserts multiple records into the specified collection.
+func (c *MilvusClient) InsertBatch(ctx context.Context, collectionName string, chunks []string, vectors [][]float32) error {
+	if len(chunks) != len(vectors) {
+		return fmt.Errorf("mismatch between number of chunks (%d) and vectors (%d)", len(chunks), len(vectors))
+	}
+	if len(chunks) == 0 {
+		return nil // Nothing to insert
+	}
+
+	// Generate UUIDs for each chunk
+	ids := make([]string, len(chunks))
+	for i := range chunks {
+		ids[i] = uuid.New().String()
+	}
+
+	// Assuming the schema has fields: "id" (VarChar, PK), "chunk" (VarChar), and "embedding" (FloatVector)
+	idCol := entity.NewColumnVarChar("id", ids)
+	chunkCol := entity.NewColumnVarChar("chunk", chunks)
+	vectorCol := entity.NewColumnFloatVector("embedding", int64(len(vectors[0])), vectors)
+
+	_, err := c.Client.Insert(ctx, collectionName, "" /* default partition */, idCol, chunkCol, vectorCol)
+	if err != nil {
+		return fmt.Errorf("failed to batch insert data into Milvus: %w", err)
+	}
+
+	log.Printf("✅ Successfully inserted %d records into collection '%s'.", len(chunks), collectionName)
+	return nil
+}
 
 var (
 	instance *MilvusClient
@@ -85,7 +115,7 @@ func (c *MilvusClient) Search(ctx context.Context, partitionName string, topK in
 		collName,
 		[]string{partitionName},
 		"",
-		[]string{"memory_id"},
+		[]string{"chunk"},
 		searchVectors,
 		c.Config.Schema.VectorField,
 		entity.L2,

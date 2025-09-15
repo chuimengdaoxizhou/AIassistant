@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -11,7 +12,22 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 )
 
+// STDIO transport (default)
+//go run main.go
+//go run main.go -transport=stdio
+//
+// SSE transport on port 8085
+//go run main.go -transport=sse -port=8085
+//
+// StreamableHTTP transport on port 9000
+//go run main.go -transport=httpstream -port=9000
+
 func main() {
+	// Define command-line flags
+	transport := flag.String("transport", "stdio", "Transport method: stdio, sse, or httpstream")
+	port := flag.String("port", "8085", "Port for HTTP-based transports (sse, httpstream)")
+	flag.Parse()
+
 	// Create a new MCP server
 	s := server.NewMCPServer(
 		"Marky",
@@ -34,9 +50,27 @@ func main() {
 	// Add tool handler
 	s.AddTool(tool, convertToMarkdown)
 
-	// Start the stdio server
-	if err := server.ServeStdio(s); err != nil {
-		log.Printf("Server error: %v\n", err)
+	// Start server based on transport selection
+	switch *transport {
+	case "sse":
+		log.Printf("Starting Marky MCP server with SSE transport on port %s", *port)
+		sseServer := server.NewSSEServer(s)
+		if err := sseServer.Start(":" + *port); err != nil {
+			log.Fatalf("SSE server error: %v", err)
+		}
+	case "httpstream":
+		log.Printf("Starting Marky MCP server with StreamableHTTP transport on port %s", *port)
+		httpServer := server.NewStreamableHTTPServer(s)
+		if err := httpServer.Start(":" + *port); err != nil {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	case "stdio":
+		log.Println("Starting Marky MCP server with STDIO transport")
+		if err := server.ServeStdio(s); err != nil {
+			log.Fatalf("STDIO server error: %v", err)
+		}
+	default:
+		log.Fatalf("Unknown transport: %s. Use stdio, sse, or httpstream", *transport)
 	}
 }
 

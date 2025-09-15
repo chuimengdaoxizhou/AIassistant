@@ -1,4 +1,3 @@
-
 package editor
 
 import (
@@ -10,7 +9,7 @@ type PowerPointPresentation struct {
 	ppt *presentation.Presentation
 }
 
-// Slide wraps a unioffice slide.
+// PPTXSlide Slide wraps a unioffice slide.
 type PPTXSlide struct {
 	slide presentation.Slide
 }
@@ -25,7 +24,7 @@ type TextBox struct {
 	tb presentation.TextBox
 }
 
-// Image wraps a unioffice image on a slide.
+// PPTXImage Image wraps a unioffice image on a slide.
 type PPTXImage struct {
 	img presentation.Image
 }

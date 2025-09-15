@@ -6,9 +6,10 @@ toolchain go1.24.7
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.4.0
+	github.com/bits-and-blooms/bitset v1.24.0
 	github.com/djherbis/times v1.6.0
 	github.com/gabriel-vasile/mimetype v1.4.9
-	github.com/gin-gonic/gin v1.10.0
+	github.com/gin-gonic/gin v1.10.1
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/gobwas/glob v0.2.3
 	github.com/golang-jwt/jwt v3.2.2+incompatible
@@ -22,13 +23,18 @@ require (
 	github.com/minio/minio-go/v7 v7.0.95
 	github.com/neo4j/neo4j-go-driver/v5 v5.28.3
 	github.com/ollama/ollama v0.11.10
+	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/segmentio/kafka-go v0.4.49
 	github.com/sirupsen/logrus v1.9.3
+	github.com/tealeg/xlsx v1.0.5
 	github.com/unidoc/unioffice/v2 v2.4.1
 	github.com/xuri/excelize/v2 v2.9.1
+	github.com/yuin/goldmark v1.7.13
 	go.etcd.io/etcd/client/v3 v3.6.4
 	go.mongodb.org/mongo-driver v1.17.4
 	golang.org/x/crypto v0.41.0
+	golang.org/x/net v0.43.0
+	golang.org/x/sync v0.16.0
 	google.golang.org/api v0.248.0
 	google.golang.org/grpc v1.74.2
 	google.golang.org/protobuf v1.36.7
@@ -39,6 +45,7 @@ require (
 )
 
 require (
+	baliance.com/gooxml v1.0.1 // indirect
 	cloud.google.com/go v0.115.0 // indirect
 	cloud.google.com/go/ai v0.8.0 // indirect
 	cloud.google.com/go/auth v0.16.5 // indirect
@@ -60,6 +67,7 @@ require (
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+	github.com/dlclark/regexp2 v1.11.4 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/evanphx/json-patch v0.5.2 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
@@ -79,6 +87,7 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.6 // indirect
 	github.com/googleapis/gax-go/v2 v2.15.0 // indirect
 	github.com/gorilla/i18n v0.0.0-20150820051429-8b358169da46 // indirect
+	github.com/gorilla/websocket v1.5.3 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.26.3 // indirect
 	github.com/invopop/jsonschema v0.13.0 // indirect
@@ -120,6 +129,7 @@ require (
 	github.com/unidoc/pkcs7 v0.2.0 // indirect
 	github.com/unidoc/timestamp v0.0.0-20200412005513-91597fd3793a // indirect
 	github.com/unidoc/unichart v0.4.0 // indirect
+	github.com/unidoc/unipdf/v3 v3.69.0 // indirect
 	github.com/unidoc/unipdf/v4 v4.0.0 // indirect
 	github.com/unidoc/unitype v0.5.1 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
@@ -142,9 +152,7 @@ require (
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/arch v0.8.0 // indirect
 	golang.org/x/image v0.25.0 // indirect
-	golang.org/x/net v0.43.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
-	golang.org/x/sync v0.16.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 	golang.org/x/time v0.12.0 // indirect

@@ -66,3 +66,13 @@ CREATE TABLE IF NOT EXISTS `user_roles` (
     CONSTRAINT `fk_user_roles_auth_role` FOREIGN KEY (`auth_role_id`) REFERENCES `roles`(`id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- 6. RAG Folders Table: Stores user-defined folders for categorizing documents.
+CREATE TABLE IF NOT EXISTS `rag_folders` (
+    `id` int unsigned NOT NULL AUTO_INCREMENT,
+    `created_at` datetime(3) NULL,
+    `updated_at` datetime(3) NULL,
+    `user_id` varchar(255) NOT NULL,
+    `name` varchar(255) NOT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE INDEX `idx_user_folder` (`user_id`, `name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

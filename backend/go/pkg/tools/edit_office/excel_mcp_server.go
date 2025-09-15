@@ -1,14 +1,19 @@
 package main
 
 import (
-	"log"
-
 	"Jarvis_2.0/backend/go/pkg/tools/edit_office/excel_handler"
+	"flag"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/mark3labs/mcp-go/server"
+	"log"
 )
 
 func main() {
+	// Define command-line flags
+	transport := flag.String("transport", "stdio", "Transport method: stdio, sse, or httpstream")
+	port := flag.String("port", "8081", "Port for HTTP-based transports (sse, httpstream)")
+	flag.Parse()
+
 	h, err := excel_handler.NewExcelHandler()
 	if err != nil {
 		log.Fatalf("failed to create excel handler: %v", err)
@@ -36,8 +41,36 @@ func main() {
 		mcp.WithString("value", mcp.Required(), mcp.Description("Value to set (string, number, or YYYY-MM-DD date).")),
 	), h.HandleSetCellValue)
 
-	log.Println("Starting Excel MCP server on :8081")
-	if err := server.ServeStdio(s); err != nil {
-		log.Fatalf("Server error: %v\n", err)
+	// Start server based on transport selection
+	switch *transport {
+	case "sse":
+		log.Printf("Starting Excel MCP server with SSE transport on port %s", *port)
+		sseServer := server.NewSSEServer(s)
+		if err := sseServer.Start(":" + *port); err != nil {
+			log.Fatalf("SSE server error: %v", err)
+		}
+	case "httpstream":
+		log.Printf("Starting Excel MCP server with StreamableHTTP transport on port %s", *port)
+		httpServer := server.NewStreamableHTTPServer(s)
+		if err := httpServer.Start(":" + *port); err != nil {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	case "stdio":
+		log.Println("Starting Excel MCP server with STDIO transport")
+		if err := server.ServeStdio(s); err != nil {
+			log.Fatalf("STDIO server error: %v", err)
+		}
+	default:
+		log.Fatalf("Unknown transport: %s. Use stdio, sse, or httpstream", *transport)
 	}
 }
+
+// STDIO transport (default)
+//go run main.go
+//go run main.go -transport=stdio
+//
+// SSE transport on port 8081
+//go run main.go -transport=sse -port=8081
+//
+// StreamableHTTP transport on port 9000
+//go run main.go -transport=httpstream -port=9000
