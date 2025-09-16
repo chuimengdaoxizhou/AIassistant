@@ -27,9 +27,9 @@
 ## 技术栈
 
 - **后端**: Go, Python
-- **AI / 大模型**: PyTorch, LangChain, ReAct, Function Calling, Gemini API, OpenAI API
+- **AI / 大模型**: ReAct, Function Calling, Gemini, OpenAI, Ollama
 - **数据库与中间件**: Milvus, Neo4j, Kafka, Redis, Minio, MySQL
-- **架构 / 基础设施**: Microservices, Docker, gRPC, Protobuf, Etcd
+- **架构 / 基础设施**: Microservices, Docker, gRPC, Etcd
 
 
 
